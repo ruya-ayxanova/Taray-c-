@@ -654,7 +654,7 @@ jobs:
                       android:text="Ana"
                       android:textSize="12sp" />
 
-                  <Button
+                <Button
                       android:id="@+id/tabsBtn"
                       style="?android:attr/buttonBarButtonStyle"
                       android:layout_width="0dp"
@@ -714,8 +714,9 @@ jobs:
           }
           rootProject.name = "Tarayici"
           include(":app")
-          EOF      - name: Ikon ve ad
-        run: |
+          EOF     
+          - name: Ikon ve ad
+          run: |
           cd proje/app/src/main
           mkdir -p res/drawable res/mipmap-anydpi res/mipmap-anydpi-v26
           cat > res/values/colors.xml <<'EOF'
