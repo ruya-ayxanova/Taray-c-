@@ -714,7 +714,107 @@ jobs:
           }
           rootProject.name = "Tarayici"
           include(":app")
+          EOF      - name: Ikon ve ad
+        run: |
+          cd proje/app/src/main
+          mkdir -p res/drawable res/mipmap-anydpi res/mipmap-anydpi-v26
+          cat > res/values/colors.xml <<'EOF'
+          <resources>
+              <color name="ic_bg">#12B5B0</color>
+          </resources>
           EOF
+          cat > res/drawable/ic_launcher_foreground.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <group
+                  android:scaleX="0.52"
+                  android:scaleY="0.52"
+                  android:translateX="19.2"
+                  android:translateY="12.4">
+                  <path
+                      android:fillColor="#FFFFFF"
+                      android:pathData="M6,74 L36,80 L6,86 Z" />
+                  <path
+                      android:fillColor="#E53935"
+                      android:pathData="M36,80 L128,30 L128,44.3 Z" />
+                  <path
+                      android:fillColor="#FB8C00"
+                      android:pathData="M36,80 L128,44.3 L128,58.6 Z" />
+                  <path
+                      android:fillColor="#FDD835"
+                      android:pathData="M36,80 L128,58.6 L128,72.9 Z" />
+                  <path
+                      android:fillColor="#43A047"
+                      android:pathData="M36,80 L128,72.9 L128,87.1 Z" />
+                  <path
+                      android:fillColor="#1E88E5"
+                      android:pathData="M36,80 L128,87.1 L128,101.4 Z" />
+                  <path
+                      android:fillColor="#3949AB"
+                      android:pathData="M36,80 L128,101.4 L128,115.7 Z" />
+                  <path
+                      android:fillColor="#8E24AA"
+                      android:pathData="M36,80 L128,115.7 L128,130 Z" />
+                  <path
+                      android:fillColor="#FFFFFF"
+                      android:pathData="M27,80 A9,9 0 1,0 45,80 A9,9 0 1,0 27,80 Z" />
+              </group>
+          </vector>
+          EOF
+          cat > res/drawable/ic_launcher_full.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="160"
+              android:viewportHeight="160">
+              <path
+                  android:fillColor="#12B5B0"
+                  android:pathData="M36,0 H124 A36,36 0 0 1 160,36 V124 A36,36 0 0 1 124,160 H36 A36,36 0 0 1 0,124 V36 A36,36 0 0 1 36,0 Z" />
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M6,74 L36,80 L6,86 Z" />
+              <path
+                  android:fillColor="#E53935"
+                  android:pathData="M36,80 L128,30 L128,44.3 Z" />
+              <path
+                  android:fillColor="#FB8C00"
+                  android:pathData="M36,80 L128,44.3 L128,58.6 Z" />
+              <path
+                  android:fillColor="#FDD835"
+                  android:pathData="M36,80 L128,58.6 L128,72.9 Z" />
+              <path
+                  android:fillColor="#43A047"
+                  android:pathData="M36,80 L128,72.9 L128,87.1 Z" />
+              <path
+                  android:fillColor="#1E88E5"
+                  android:pathData="M36,80 L128,87.1 L128,101.4 Z" />
+              <path
+                  android:fillColor="#3949AB"
+                  android:pathData="M36,80 L128,101.4 L128,115.7 Z" />
+              <path
+                  android:fillColor="#8E24AA"
+                  android:pathData="M36,80 L128,115.7 L128,130 Z" />
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M27,80 A9,9 0 1,0 45,80 A9,9 0 1,0 27,80 Z" />
+          </vector>
+          EOF
+          cat > res/mipmap-anydpi/ic_launcher.xml <<'EOF'
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:drawable="@drawable/ic_launcher_full" />
+          </layer-list>
+          EOF
+          cat > res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_bg" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+          sed -i 's/Tarayıcı/Sonsuz/' res/values/strings.xml
+          sed -i 's|android:allowBackup="true"|android:allowBackup="true" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"|' AndroidManifest.xml
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
