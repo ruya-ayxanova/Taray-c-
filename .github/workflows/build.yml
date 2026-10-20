@@ -58,11 +58,15 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
               <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission
+                  android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+                  android:maxSdkVersion="28" />
 
               <application
                   android:allowBackup="true"
                   android:label="@string/app_name"
-                  android:theme="@style/Theme.Tarayici">
+                  android:theme="@style/Theme.Tarayici"
+                  android:usesCleartextTraffic="true">
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -79,65 +83,168 @@ jobs:
           cat > app/src/main/java/com/tarayici/app/MainActivity.kt <<'EOF'
           package com.tarayici.app
 
+          import android.Manifest
           import android.annotation.SuppressLint
+          import android.app.DownloadManager
+          import android.content.Context
+          import android.content.Intent
+          import android.content.SharedPreferences
+          import android.content.pm.PackageManager
           import android.graphics.Bitmap
           import android.net.Uri
+          import android.os.Build
           import android.os.Bundle
+          import android.os.Environment
+          import android.os.Handler
+          import android.os.Looper
           import android.view.KeyEvent
           import android.view.View
+          import android.view.ViewGroup
           import android.view.inputmethod.EditorInfo
           import android.view.inputmethod.InputMethodManager
+          import android.webkit.CookieManager
+          import android.webkit.URLUtil
           import android.webkit.WebChromeClient
+          import android.webkit.WebResourceRequest
+          import android.webkit.WebResourceResponse
+          import android.webkit.WebSettings
           import android.webkit.WebView
           import android.webkit.WebViewClient
           import android.widget.Button
           import android.widget.EditText
+          import android.widget.FrameLayout
+          import android.widget.GridLayout
+          import android.widget.LinearLayout
+          import android.widget.PopupMenu
           import android.widget.ProgressBar
+          import android.widget.TextView
+          import android.widget.Toast
           import androidx.activity.OnBackPressedCallback
+          import androidx.appcompat.app.AlertDialog
           import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.app.ActivityCompat
+          import androidx.core.content.ContextCompat
+          import java.io.ByteArrayInputStream
+
+          class Tab(val incognito: Boolean) {
+              lateinit var webView: WebView
+              var home: Boolean = true
+              var mediaUrl: String? = null
+          }
 
           class MainActivity : AppCompatActivity() {
 
-              private lateinit var webView: WebView
+              private val tabs = mutableListOf<Tab>()
+              private var current = 0
+
               private lateinit var urlBar: EditText
               private lateinit var progress: ProgressBar
+              private lateinit var webContainer: FrameLayout
+              private lateinit var homeView: View
+              private lateinit var downloadBar: LinearLayout
+              private lateinit var downloadText: TextView
+              private lateinit var tabsBtn: Button
+              private lateinit var prefs: SharedPreferences
 
-              @SuppressLint("SetJavaScriptEnabled")
+              private var adBlock = true
+              private var darkWeb = false
+              private val mainHandler = Handler(Looper.getMainLooper())
+
+              private val shortcuts = listOf(
+                  "Google" to "https://www.google.com",
+                  "YouTube" to "https://m.youtube.com",
+                  "Facebook" to "https://m.facebook.com",
+                  "Instagram" to "https://www.instagram.com",
+                  "TikTok" to "https://www.tiktok.com",
+                  "Vimeo" to "https://vimeo.com",
+                  "Pinterest" to "https://www.pinterest.com",
+                  "TED" to "https://www.ted.com",
+                  "SoundCloud" to "https://soundcloud.com",
+                  "Wikipedia" to "https://tr.wikipedia.org",
+                  "X" to "https://x.com",
+                  "Haberler" to "https://news.google.com"
+              )
+
+              private val adDomains = listOf(
+                  "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+                  "adservice.google.com", "adnxs.com", "taboola.com", "outbrain.com",
+                  "criteo.com", "pubmatic.com", "rubiconproject.com", "moatads.com",
+                  "adsrvr.org", "popads.net", "propellerads.com", "exoclick.com",
+                  "adcolony.com", "scorecardresearch.com", "amazon-adsystem.com",
+                  "ads.yahoo.com", "advertising.com", "adform.net", "mgid.com",
+                  "revcontent.com", "smartadserver.com", "openx.net"
+              )
+
+              private val videoExt = setOf("mp4", "webm", "m4v", "mkv", "3gp")
+              private val audioExt = setOf("mp3", "m4a", "aac", "ogg", "wav", "flac")
+
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   setContentView(R.layout.activity_main)
 
-                  webView = findViewById(R.id.webView)
+                  prefs = getSharedPreferences("ayarlar", Context.MODE_PRIVATE)
+                  adBlock = prefs.getBoolean("adblock", true)
+                  darkWeb = prefs.getBoolean("dark", false)
+
                   urlBar = findViewById(R.id.urlBar)
                   progress = findViewById(R.id.progress)
+                  webContainer = findViewById(R.id.webContainer)
+                  homeView = findViewById(R.id.homeView)
+                  downloadBar = findViewById(R.id.downloadBar)
+                  downloadText = findViewById(R.id.downloadText)
+                  tabsBtn = findViewById(R.id.tabsBtn)
 
-                  webView.settings.javaScriptEnabled = true
-                  webView.settings.domStorageEnabled = true
-                  webView.settings.builtInZoomControls = true
-                  webView.settings.displayZoomControls = false
-
-                  webView.webViewClient = object : WebViewClient() {
-                      override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                          url?.let { urlBar.setText(it) }
-                      }
-                  }
-                  webView.webChromeClient = object : WebChromeClient() {
-                      override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                          progress.progress = newProgress
-                          progress.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
-                      }
+                  if (Build.VERSION.SDK_INT <= 28 &&
+                      ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                      != PackageManager.PERMISSION_GRANTED
+                  ) {
+                      ActivityCompat.requestPermissions(
+                          this, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 1
+                      )
                   }
 
-                  findViewById<Button>(R.id.goBtn).setOnClickListener { loadFromBar() }
-                  findViewById<Button>(R.id.backBtn).setOnClickListener { if (webView.canGoBack()) webView.goBack() }
-                  findViewById<Button>(R.id.forwardBtn).setOnClickListener { if (webView.canGoForward()) webView.goForward() }
-                  findViewById<Button>(R.id.refreshBtn).setOnClickListener { webView.reload() }
+                  val grid = findViewById<GridLayout>(R.id.homeGrid)
+                  for ((name, link) in shortcuts) {
+                      val b = Button(this)
+                      b.text = name
+                      val lp = GridLayout.LayoutParams()
+                      lp.width = 0
+                      lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                      lp.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                      lp.setMargins(8, 8, 8, 8)
+                      b.layoutParams = lp
+                      b.setOnClickListener { openUrl(link) }
+                      grid.addView(b)
+                  }
+
+                  findViewById<Button>(R.id.goBtn).setOnClickListener { openUrl(urlBar.text.toString()) }
+                  findViewById<Button>(R.id.backBtn).setOnClickListener { goBackOrExit() }
+                  findViewById<Button>(R.id.forwardBtn).setOnClickListener {
+                      val t = currentTab()
+                      if (!t.home && t.webView.canGoForward()) t.webView.goForward()
+                  }
+                  findViewById<Button>(R.id.homeBtn).setOnClickListener {
+                      currentTab().home = true
+                      refreshView()
+                  }
+                  tabsBtn.setOnClickListener { showTabs() }
+                  findViewById<Button>(R.id.menuBtn).setOnClickListener { showMenu(it) }
+                  findViewById<Button>(R.id.downloadBtn).setOnClickListener {
+                      val t = currentTab()
+                      val m = t.mediaUrl
+                      if (m != null) {
+                          startDownload(
+                              m, t.webView.url, t.webView.settings.userAgentString,
+                              URLUtil.guessFileName(m, null, null), null
+                          )
+                      }
+                  }
 
                   urlBar.setOnEditorActionListener { _, actionId, event ->
                       if (actionId == EditorInfo.IME_ACTION_GO ||
                           (event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN)
                       ) {
-                          loadFromBar()
+                          openUrl(urlBar.text.toString())
                           true
                       } else {
                           false
@@ -146,26 +253,256 @@ jobs:
 
                   onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
                       override fun handleOnBackPressed() {
-                          if (webView.canGoBack()) {
-                              webView.goBack()
-                          } else {
-                              isEnabled = false
-                              onBackPressedDispatcher.onBackPressed()
-                          }
+                          goBackOrExit()
                       }
                   })
 
-                  webView.loadUrl(HOME_URL)
+                  newTab(false)
               }
 
-              private fun loadFromBar() {
-                  val url = toUrl(urlBar.text.toString())
-                  if (url.isNotEmpty()) {
-                      webView.loadUrl(url)
+              override fun onDestroy() {
+                  for (t in tabs) {
+                      t.webView.destroy()
                   }
+                  super.onDestroy()
+              }
+
+              private fun currentTab(): Tab = tabs[current]
+
+              private fun isCurrent(tab: Tab): Boolean = tabs.getOrNull(current) === tab
+
+              private fun newTab(incognito: Boolean) {
+                  val tab = Tab(incognito)
+                  tab.webView = createWebView(tab)
+                  tabs.add(tab)
+                  switchTo(tabs.size - 1)
+              }
+
+              private fun closeTab(index: Int) {
+                  val t = tabs.removeAt(index)
+                  (t.webView.parent as? ViewGroup)?.removeView(t.webView)
+                  t.webView.destroy()
+                  if (tabs.isEmpty()) {
+                      newTab(false)
+                  } else {
+                      switchTo(minOf(index, tabs.size - 1))
+                  }
+              }
+
+              private fun switchTo(index: Int) {
+                  current = index
+                  val tab = tabs[index]
+                  webContainer.removeAllViews()
+                  (tab.webView.parent as? ViewGroup)?.removeView(tab.webView)
+                  webContainer.addView(tab.webView)
+                  refreshView()
+              }
+
+              private fun refreshView() {
+                  val tab = currentTab()
+                  if (tab.home) {
+                      homeView.visibility = View.VISIBLE
+                      webContainer.visibility = View.GONE
+                      urlBar.setText("")
+                  } else {
+                      homeView.visibility = View.GONE
+                      webContainer.visibility = View.VISIBLE
+                      urlBar.setText(tab.webView.url ?: "")
+                  }
+                  urlBar.hint = if (tab.incognito) "Gizli sekme: ara veya adres yaz" else "Ara veya adres yaz"
+                  progress.visibility = View.GONE
+                  tabsBtn.text = "Sekme " + tabs.size
+                  updateDownloadBar()
+              }
+
+              private fun openUrl(raw: String) {
+                  val url = toUrl(raw)
+                  if (url.isEmpty()) return
+                  val tab = currentTab()
+                  tab.home = false
+                  homeView.visibility = View.GONE
+                  webContainer.visibility = View.VISIBLE
+                  tab.webView.loadUrl(url)
                   val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
                   imm.hideSoftInputFromWindow(urlBar.windowToken, 0)
-                  webView.requestFocus()
+                  tab.webView.requestFocus()
+              }
+
+              private fun goBackOrExit() {
+                  val tab = currentTab()
+                  if (!tab.home && tab.webView.canGoBack()) {
+                      tab.webView.goBack()
+                  } else if (!tab.home) {
+                      tab.home = true
+                      refreshView()
+                  } else if (tabs.size > 1) {
+                      closeTab(current)
+                  } else {
+                      finish()
+                  }
+              }
+
+              @SuppressLint("SetJavaScriptEnabled")
+              private fun createWebView(tab: Tab): WebView {
+                  val wv = WebView(this)
+                  wv.layoutParams = FrameLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+                  )
+                  val s = wv.settings
+                  s.javaScriptEnabled = true
+                  s.domStorageEnabled = true
+                  s.builtInZoomControls = true
+                  s.displayZoomControls = false
+                  if (tab.incognito) {
+                      s.cacheMode = WebSettings.LOAD_NO_CACHE
+                  }
+                  CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
+
+                  wv.webViewClient = object : WebViewClient() {
+                      override fun shouldInterceptRequest(
+                          view: WebView?, request: WebResourceRequest?
+                      ): WebResourceResponse? {
+                          val u = request?.url ?: return null
+                          val host = u.host ?: return null
+                          if (adBlock && isAdHost(host)) {
+                              return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                          }
+                          val path = (u.path ?: "").lowercase()
+                          if (isMediaPath(path)) {
+                              val link = u.toString()
+                              mainHandler.post { onMediaFound(tab, link) }
+                          }
+                          return null
+                      }
+
+                      override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                          tab.mediaUrl = null
+                          if (isCurrent(tab)) {
+                              url?.let { urlBar.setText(it) }
+                              updateDownloadBar()
+                          }
+                      }
+
+                      override fun onPageFinished(view: WebView?, url: String?) {
+                          if (darkWeb) {
+                              view?.evaluateJavascript(DARK_ON, null)
+                          }
+                      }
+                  }
+
+                  wv.webChromeClient = object : WebChromeClient() {
+                      override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                          if (isCurrent(tab)) {
+                              progress.progress = newProgress
+                              progress.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
+                          }
+                      }
+                  }
+
+                  wv.setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
+                      startDownload(
+                          url, wv.url, userAgent,
+                          URLUtil.guessFileName(url, contentDisposition, mimetype), mimetype
+                      )
+                  }
+                  return wv
+              }
+
+              private fun isAdHost(host: String): Boolean {
+                  return adDomains.any { host == it || host.endsWith("." + it) }
+              }
+
+              private fun isMediaPath(path: String): Boolean {
+                  val ext = path.substringAfterLast('.', "")
+                  return ext in videoExt || ext in audioExt
+              }
+
+              private fun onMediaFound(tab: Tab, link: String) {
+                  tab.mediaUrl = link
+                  if (isCurrent(tab)) updateDownloadBar()
+              }
+
+              private fun updateDownloadBar() {
+                  val m = currentTab().mediaUrl
+                  if (m != null && !currentTab().home) {
+                      downloadText.text = "Medya bulundu: " + URLUtil.guessFileName(m, null, null)
+                      downloadBar.visibility = View.VISIBLE
+                  } else {
+                      downloadBar.visibility = View.GONE
+                  }
+              }
+
+              private fun startDownload(
+                  url: String, referer: String?, userAgent: String?, fileName: String, mime: String?
+              ) {
+                  try {
+                      val ext = fileName.substringAfterLast('.', "").lowercase()
+                      val isAudio = (mime?.startsWith("audio") == true) || ext in audioExt
+                      val isVideo = (mime?.startsWith("video") == true) || ext in videoExt
+                      val dir = when {
+                          isAudio -> Environment.DIRECTORY_MUSIC
+                          isVideo -> Environment.DIRECTORY_MOVIES
+                          else -> Environment.DIRECTORY_DOWNLOADS
+                      }
+                      val req = DownloadManager.Request(Uri.parse(url))
+                      req.setTitle(fileName)
+                      req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                      req.setDestinationInExternalPublicDir(dir, fileName)
+                      if (userAgent != null) req.addRequestHeader("User-Agent", userAgent)
+                      if (referer != null) req.addRequestHeader("Referer", referer)
+                      val cookie = CookieManager.getInstance().getCookie(url)
+                      if (cookie != null) req.addRequestHeader("Cookie", cookie)
+                      val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                      dm.enqueue(req)
+                      Toast.makeText(this, "İndirme başladı: " + fileName, Toast.LENGTH_SHORT).show()
+                  } catch (e: Exception) {
+                      Toast.makeText(this, "İndirme başlatılamadı", Toast.LENGTH_SHORT).show()
+                  }
+              }
+
+              private fun showTabs() {
+                  val names = ArrayList<String>()
+                  for ((i, t) in tabs.withIndex()) {
+                      var name = if (t.home) "Ana sayfa" else (t.webView.title ?: "Sayfa")
+                      if (t.incognito) name = "(Gizli) " + name
+                      if (i == current) name = "> " + name
+                      names.add(name)
+                  }
+                  AlertDialog.Builder(this)
+                      .setTitle("Sekmeler")
+                      .setItems(names.toTypedArray()) { _, i -> switchTo(i) }
+                      .setPositiveButton("Yeni sekme") { _, _ -> newTab(false) }
+                      .setNegativeButton("Bu sekmeyi kapat") { _, _ -> closeTab(current) }
+                      .show()
+              }
+
+              private fun showMenu(anchor: View) {
+                  val pm = PopupMenu(this, anchor)
+                  val m = pm.menu
+                  m.add("Yeni sekme").setOnMenuItemClickListener { newTab(false); true }
+                  m.add("Yeni gizli sekme").setOnMenuItemClickListener { newTab(true); true }
+                  m.add("Bu sekmeyi kapat").setOnMenuItemClickListener { closeTab(current); true }
+                  m.add(if (adBlock) "Reklam engelleyici: AÇIK" else "Reklam engelleyici: KAPALI")
+                      .setOnMenuItemClickListener {
+                          adBlock = !adBlock
+                          prefs.edit().putBoolean("adblock", adBlock).apply()
+                          if (!currentTab().home) currentTab().webView.reload()
+                          true
+                      }
+                  m.add(if (darkWeb) "Gece modu: AÇIK" else "Gece modu: KAPALI")
+                      .setOnMenuItemClickListener {
+                          darkWeb = !darkWeb
+                          prefs.edit().putBoolean("dark", darkWeb).apply()
+                          for (t in tabs) {
+                              t.webView.evaluateJavascript(if (darkWeb) DARK_ON else DARK_OFF, null)
+                          }
+                          true
+                      }
+                  m.add("İndirilenler").setOnMenuItemClickListener {
+                      startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
+                      true
+                  }
+                  pm.show()
               }
 
               private fun toUrl(input: String): String {
@@ -174,14 +511,20 @@ jobs:
                   if (text.startsWith("http://") || text.startsWith("https://")) return text
                   val looksLikeAddress = !text.contains(" ") && text.contains(".")
                   return if (looksLikeAddress) {
-                      "https://$text"
+                      "https://" + text
                   } else {
                       "https://www.google.com/search?q=" + Uri.encode(text)
                   }
               }
 
               companion object {
-                  private const val HOME_URL = "https://www.google.com"
+                  private const val DARK_ON =
+                      "(function(){var s=document.getElementById('__dk');if(!s){s=document.createElement('style');" +
+                          "s.id='__dk';(document.head||document.documentElement).appendChild(s);}" +
+                          "s.textContent='html{filter:invert(1) hue-rotate(180deg)!important;background:#fff!important}" +
+                          "img,video,picture,canvas{filter:invert(1) hue-rotate(180deg)!important}';})();"
+                  private const val DARK_OFF =
+                      "(function(){var s=document.getElementById('__dk');if(s){s.remove();}})();"
               }
           }
           EOF
@@ -226,11 +569,55 @@ jobs:
                   android:max="100"
                   android:visibility="gone" />
 
-              <WebView
-                  android:id="@+id/webView"
+              <FrameLayout
                   android:layout_width="match_parent"
                   android:layout_height="0dp"
-                  android:layout_weight="1" />
+                  android:layout_weight="1">
+
+                  <ScrollView
+                      android:id="@+id/homeView"
+                      android:layout_width="match_parent"
+                      android:layout_height="match_parent">
+
+                      <GridLayout
+                          android:id="@+id/homeGrid"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:columnCount="3"
+                          android:padding="12dp" />
+                  </ScrollView>
+
+                  <FrameLayout
+                      android:id="@+id/webContainer"
+                      android:layout_width="match_parent"
+                      android:layout_height="match_parent"
+                      android:visibility="gone" />
+              </FrameLayout>
+
+              <LinearLayout
+                  android:id="@+id/downloadBar"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:background="?attr/colorSurfaceVariant"
+                  android:gravity="center_vertical"
+                  android:orientation="horizontal"
+                  android:padding="8dp"
+                  android:visibility="gone">
+
+                  <TextView
+                      android:id="@+id/downloadText"
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:ellipsize="end"
+                      android:maxLines="1" />
+
+                  <Button
+                      android:id="@+id/downloadBtn"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="İndir" />
+              </LinearLayout>
 
               <LinearLayout
                   android:layout_width="match_parent"
@@ -243,7 +630,9 @@ jobs:
                       android:layout_width="0dp"
                       android:layout_height="wrap_content"
                       android:layout_weight="1"
-                      android:text="Geri" />
+                      android:minWidth="0dp"
+                      android:text="Geri"
+                      android:textSize="12sp" />
 
                   <Button
                       android:id="@+id/forwardBtn"
@@ -251,15 +640,39 @@ jobs:
                       android:layout_width="0dp"
                       android:layout_height="wrap_content"
                       android:layout_weight="1"
-                      android:text="İleri" />
+                      android:minWidth="0dp"
+                      android:text="İleri"
+                      android:textSize="12sp" />
 
                   <Button
-                      android:id="@+id/refreshBtn"
+                      android:id="@+id/homeBtn"
                       style="?android:attr/buttonBarButtonStyle"
                       android:layout_width="0dp"
                       android:layout_height="wrap_content"
                       android:layout_weight="1"
-                      android:text="Yenile" />
+                      android:minWidth="0dp"
+                      android:text="Ana"
+                      android:textSize="12sp" />
+
+                  <Button
+                      android:id="@+id/tabsBtn"
+                      style="?android:attr/buttonBarButtonStyle"
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:minWidth="0dp"
+                      android:text="Sekme 1"
+                      android:textSize="12sp" />
+
+                  <Button
+                      android:id="@+id/menuBtn"
+                      style="?android:attr/buttonBarButtonStyle"
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:minWidth="0dp"
+                      android:text="Menü"
+                      android:textSize="12sp" />
               </LinearLayout>
           </LinearLayout>
           EOF
