@@ -1,703 +1,22 @@
 name: APK Derle
+
 on:
   push:
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Proje dosyalarini olustur
         run: |
-          mkdir -p proje
-          cd proje
-          mkdir -p app app/src/main app/src/main/java/com/tarayici/app app/src/main/res/layout app/src/main/res/values
-          cat > app/build.gradle.kts <<'EOF'
-          plugins {
-              id("com.android.application")
-              id("org.jetbrains.kotlin.android")
-          }
-
-          android {
-              namespace = "com.tarayici.app"
-              compileSdk = 34
-
-              defaultConfig {
-                  applicationId = "com.tarayici.app"
-                  minSdk = 24
-                  targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
-              }
-
-              buildTypes {
-                  release {
-                      isMinifyEnabled = false
-                  }
-              }
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-              lint {
-                  abortOnError = false
-              }
-          }
-
-          dependencies {
-              implementation("androidx.core:core-ktx:1.13.1")
-              implementation("androidx.appcompat:appcompat:1.7.0")
-              implementation("com.google.android.material:material:1.12.0")
-          }
-          EOF
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission
-                  android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-                  android:maxSdkVersion="28" />
-
-              <application
-                  android:allowBackup="true"
-                  android:label="@string/app_name"
-                  android:theme="@style/Theme.Tarayici"
-                  android:usesCleartextTraffic="true">
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:configChanges="orientation|screenSize|keyboardHidden"
-                      android:windowSoftInputMode="adjustResize">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
-          cat > app/src/main/java/com/tarayici/app/MainActivity.kt <<'EOF'
-          package com.tarayici.app
-
-          import android.Manifest
-          import android.annotation.SuppressLint
-          import android.app.DownloadManager
-          import android.content.Context
-          import android.content.Intent
-          import android.content.SharedPreferences
-          import android.content.pm.PackageManager
-          import android.graphics.Bitmap
-          import android.net.Uri
-          import android.os.Build
-          import android.os.Bundle
-          import android.os.Environment
-          import android.os.Handler
-          import android.os.Looper
-          import android.view.KeyEvent
-          import android.view.View
-          import android.view.ViewGroup
-          import android.view.inputmethod.EditorInfo
-          import android.view.inputmethod.InputMethodManager
-          import android.webkit.CookieManager
-          import android.webkit.URLUtil
-          import android.webkit.WebChromeClient
-          import android.webkit.WebResourceRequest
-          import android.webkit.WebResourceResponse
-          import android.webkit.WebSettings
-          import android.webkit.WebView
-          import android.webkit.WebViewClient
-          import android.widget.Button
-          import android.widget.EditText
-          import android.widget.FrameLayout
-          import android.widget.GridLayout
-          import android.widget.LinearLayout
-          import android.widget.PopupMenu
-          import android.widget.ProgressBar
-          import android.widget.TextView
-          import android.widget.Toast
-          import androidx.activity.OnBackPressedCallback
-          import androidx.appcompat.app.AlertDialog
-          import androidx.appcompat.app.AppCompatActivity
-          import androidx.core.app.ActivityCompat
-          import androidx.core.content.ContextCompat
-          import java.io.ByteArrayInputStream
-
-          class Tab(val incognito: Boolean) {
-              lateinit var webView: WebView
-              var home: Boolean = true
-              var mediaUrl: String? = null
-          }
-
-          class MainActivity : AppCompatActivity() {
-
-              private val tabs = mutableListOf<Tab>()
-              private var current = 0
-
-              private lateinit var urlBar: EditText
-              private lateinit var progress: ProgressBar
-              private lateinit var webContainer: FrameLayout
-              private lateinit var homeView: View
-              private lateinit var downloadBar: LinearLayout
-              private lateinit var downloadText: TextView
-              private lateinit var tabsBtn: Button
-              private lateinit var prefs: SharedPreferences
-
-              private var adBlock = true
-              private var darkWeb = false
-              private val mainHandler = Handler(Looper.getMainLooper())
-
-              private val shortcuts = listOf(
-                  "Google" to "https://www.google.com",
-                  "YouTube" to "https://m.youtube.com",
-                  "Facebook" to "https://m.facebook.com",
-                  "Instagram" to "https://www.instagram.com",
-                  "TikTok" to "https://www.tiktok.com",
-                  "Vimeo" to "https://vimeo.com",
-                  "Pinterest" to "https://www.pinterest.com",
-                  "TED" to "https://www.ted.com",
-                  "SoundCloud" to "https://soundcloud.com",
-                  "Wikipedia" to "https://tr.wikipedia.org",
-                  "X" to "https://x.com",
-                  "Haberler" to "https://news.google.com"
-              )
-
-              private val adDomains = listOf(
-                  "doubleclick.net", "googlesyndication.com", "googleadservices.com",
-                  "adservice.google.com", "adnxs.com", "taboola.com", "outbrain.com",
-                  "criteo.com", "pubmatic.com", "rubiconproject.com", "moatads.com",
-                  "adsrvr.org", "popads.net", "propellerads.com", "exoclick.com",
-                  "adcolony.com", "scorecardresearch.com", "amazon-adsystem.com",
-                  "ads.yahoo.com", "advertising.com", "adform.net", "mgid.com",
-                  "revcontent.com", "smartadserver.com", "openx.net"
-              )
-
-              private val videoExt = setOf("mp4", "webm", "m4v", "mkv", "3gp")
-              private val audioExt = setOf("mp3", "m4a", "aac", "ogg", "wav", "flac")
-
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  setContentView(R.layout.activity_main)
-
-                  prefs = getSharedPreferences("ayarlar", Context.MODE_PRIVATE)
-                  adBlock = prefs.getBoolean("adblock", true)
-                  darkWeb = prefs.getBoolean("dark", false)
-
-                  urlBar = findViewById(R.id.urlBar)
-                  progress = findViewById(R.id.progress)
-                  webContainer = findViewById(R.id.webContainer)
-                  homeView = findViewById(R.id.homeView)
-                  downloadBar = findViewById(R.id.downloadBar)
-                  downloadText = findViewById(R.id.downloadText)
-                  tabsBtn = findViewById(R.id.tabsBtn)
-
-                  if (Build.VERSION.SDK_INT <= 28 &&
-                      ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                      != PackageManager.PERMISSION_GRANTED
-                  ) {
-                      ActivityCompat.requestPermissions(
-                          this, arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 1
-                      )
-                  }
-
-                  val grid = findViewById<GridLayout>(R.id.homeGrid)
-                  for ((name, link) in shortcuts) {
-                      val b = Button(this)
-                      b.text = name
-                      val lp = GridLayout.LayoutParams()
-                      lp.width = 0
-                      lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
-                      lp.columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                      lp.setMargins(8, 8, 8, 8)
-                      b.layoutParams = lp
-                      b.setOnClickListener { openUrl(link) }
-                      grid.addView(b)
-                  }
-
-                  findViewById<Button>(R.id.goBtn).setOnClickListener { openUrl(urlBar.text.toString()) }
-                  findViewById<Button>(R.id.backBtn).setOnClickListener { goBackOrExit() }
-                  findViewById<Button>(R.id.forwardBtn).setOnClickListener {
-                      val t = currentTab()
-                      if (!t.home && t.webView.canGoForward()) t.webView.goForward()
-                  }
-                  findViewById<Button>(R.id.homeBtn).setOnClickListener {
-                      currentTab().home = true
-                      refreshView()
-                  }
-                  tabsBtn.setOnClickListener { showTabs() }
-                  findViewById<Button>(R.id.menuBtn).setOnClickListener { showMenu(it) }
-                  findViewById<Button>(R.id.downloadBtn).setOnClickListener {
-                      val t = currentTab()
-                      val m = t.mediaUrl
-                      if (m != null) {
-                          startDownload(
-                              m, t.webView.url, t.webView.settings.userAgentString,
-                              URLUtil.guessFileName(m, null, null), null
-                          )
-                      }
-                  }
-
-                  urlBar.setOnEditorActionListener { _, actionId, event ->
-                      if (actionId == EditorInfo.IME_ACTION_GO ||
-                          (event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN)
-                      ) {
-                          openUrl(urlBar.text.toString())
-                          true
-                      } else {
-                          false
-                      }
-                  }
-
-                  onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-                      override fun handleOnBackPressed() {
-                          goBackOrExit()
-                      }
-                  })
-
-                  newTab(false)
-              }
-
-              override fun onDestroy() {
-                  for (t in tabs) {
-                      t.webView.destroy()
-                  }
-                  super.onDestroy()
-              }
-
-              private fun currentTab(): Tab = tabs[current]
-
-              private fun isCurrent(tab: Tab): Boolean = tabs.getOrNull(current) === tab
-
-              private fun newTab(incognito: Boolean) {
-                  val tab = Tab(incognito)
-                  tab.webView = createWebView(tab)
-                  tabs.add(tab)
-                  switchTo(tabs.size - 1)
-              }
-
-              private fun closeTab(index: Int) {
-                  val t = tabs.removeAt(index)
-                  (t.webView.parent as? ViewGroup)?.removeView(t.webView)
-                  t.webView.destroy()
-                  if (tabs.isEmpty()) {
-                      newTab(false)
-                  } else {
-                      switchTo(minOf(index, tabs.size - 1))
-                  }
-              }
-
-              private fun switchTo(index: Int) {
-                  current = index
-                  val tab = tabs[index]
-                  webContainer.removeAllViews()
-                  (tab.webView.parent as? ViewGroup)?.removeView(tab.webView)
-                  webContainer.addView(tab.webView)
-                  refreshView()
-              }
-
-              private fun refreshView() {
-                  val tab = currentTab()
-                  if (tab.home) {
-                      homeView.visibility = View.VISIBLE
-                      webContainer.visibility = View.GONE
-                      urlBar.setText("")
-                  } else {
-                      homeView.visibility = View.GONE
-                      webContainer.visibility = View.VISIBLE
-                      urlBar.setText(tab.webView.url ?: "")
-                  }
-                  urlBar.hint = if (tab.incognito) "Gizli sekme: ara veya adres yaz" else "Ara veya adres yaz"
-                  progress.visibility = View.GONE
-                  tabsBtn.text = "Sekme " + tabs.size
-                  updateDownloadBar()
-              }
-
-              private fun openUrl(raw: String) {
-                  val url = toUrl(raw)
-                  if (url.isEmpty()) return
-                  val tab = currentTab()
-                  tab.home = false
-                  homeView.visibility = View.GONE
-                  webContainer.visibility = View.VISIBLE
-                  tab.webView.loadUrl(url)
-                  val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-                  imm.hideSoftInputFromWindow(urlBar.windowToken, 0)
-                  tab.webView.requestFocus()
-              }
-
-              private fun goBackOrExit() {
-                  val tab = currentTab()
-                  if (!tab.home && tab.webView.canGoBack()) {
-                      tab.webView.goBack()
-                  } else if (!tab.home) {
-                      tab.home = true
-                      refreshView()
-                  } else if (tabs.size > 1) {
-                      closeTab(current)
-                  } else {
-                      finish()
-                  }
-              }
-
-              @SuppressLint("SetJavaScriptEnabled")
-              private fun createWebView(tab: Tab): WebView {
-                  val wv = WebView(this)
-                  wv.layoutParams = FrameLayout.LayoutParams(
-                      ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-                  )
-                  val s = wv.settings
-                  s.javaScriptEnabled = true
-                  s.domStorageEnabled = true
-                  s.builtInZoomControls = true
-                  s.displayZoomControls = false
-                  if (tab.incognito) {
-                      s.cacheMode = WebSettings.LOAD_NO_CACHE
-                  }
-                  CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
-
-                  wv.webViewClient = object : WebViewClient() {
-                      override fun shouldInterceptRequest(
-                          view: WebView?, request: WebResourceRequest?
-                      ): WebResourceResponse? {
-                          val u = request?.url ?: return null
-                          val host = u.host ?: return null
-                          if (adBlock && isAdHost(host)) {
-                              return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
-                          }
-                          val path = (u.path ?: "").lowercase()
-                          if (isMediaPath(path)) {
-                              val link = u.toString()
-                              mainHandler.post { onMediaFound(tab, link) }
-                          }
-                          return null
-                      }
-
-                      override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                          tab.mediaUrl = null
-                          if (isCurrent(tab)) {
-                              url?.let { urlBar.setText(it) }
-                              updateDownloadBar()
-                          }
-                      }
-
-                      override fun onPageFinished(view: WebView?, url: String?) {
-                          if (darkWeb) {
-                              view?.evaluateJavascript(DARK_ON, null)
-                          }
-                      }
-                  }
-
-                  wv.webChromeClient = object : WebChromeClient() {
-                      override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                          if (isCurrent(tab)) {
-                              progress.progress = newProgress
-                              progress.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
-                          }
-                      }
-                  }
-
-                  wv.setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
-                      startDownload(
-                          url, wv.url, userAgent,
-                          URLUtil.guessFileName(url, contentDisposition, mimetype), mimetype
-                      )
-                  }
-                  return wv
-              }
-
-              private fun isAdHost(host: String): Boolean {
-                  return adDomains.any { host == it || host.endsWith("." + it) }
-              }
-
-              private fun isMediaPath(path: String): Boolean {
-                  val ext = path.substringAfterLast('.', "")
-                  return ext in videoExt || ext in audioExt
-              }
-
-              private fun onMediaFound(tab: Tab, link: String) {
-                  tab.mediaUrl = link
-                  if (isCurrent(tab)) updateDownloadBar()
-              }
-
-              private fun updateDownloadBar() {
-                  val m = currentTab().mediaUrl
-                  if (m != null && !currentTab().home) {
-                      downloadText.text = "Medya bulundu: " + URLUtil.guessFileName(m, null, null)
-                      downloadBar.visibility = View.VISIBLE
-                  } else {
-                      downloadBar.visibility = View.GONE
-                  }
-              }
-
-              private fun startDownload(
-                  url: String, referer: String?, userAgent: String?, fileName: String, mime: String?
-              ) {
-                  try {
-                      val ext = fileName.substringAfterLast('.', "").lowercase()
-                      val isAudio = (mime?.startsWith("audio") == true) || ext in audioExt
-                      val isVideo = (mime?.startsWith("video") == true) || ext in videoExt
-                      val dir = when {
-                          isAudio -> Environment.DIRECTORY_MUSIC
-                          isVideo -> Environment.DIRECTORY_MOVIES
-                          else -> Environment.DIRECTORY_DOWNLOADS
-                      }
-                      val req = DownloadManager.Request(Uri.parse(url))
-                      req.setTitle(fileName)
-                      req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                      req.setDestinationInExternalPublicDir(dir, fileName)
-                      if (userAgent != null) req.addRequestHeader("User-Agent", userAgent)
-                      if (referer != null) req.addRequestHeader("Referer", referer)
-                      val cookie = CookieManager.getInstance().getCookie(url)
-                      if (cookie != null) req.addRequestHeader("Cookie", cookie)
-                      val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                      dm.enqueue(req)
-                      Toast.makeText(this, "İndirme başladı: " + fileName, Toast.LENGTH_SHORT).show()
-                  } catch (e: Exception) {
-                      Toast.makeText(this, "İndirme başlatılamadı", Toast.LENGTH_SHORT).show()
-                  }
-              }
-
-              private fun showTabs() {
-                  val names = ArrayList<String>()
-                  for ((i, t) in tabs.withIndex()) {
-                      var name = if (t.home) "Ana sayfa" else (t.webView.title ?: "Sayfa")
-                      if (t.incognito) name = "(Gizli) " + name
-                      if (i == current) name = "> " + name
-                      names.add(name)
-                  }
-                  AlertDialog.Builder(this)
-                      .setTitle("Sekmeler")
-                      .setItems(names.toTypedArray()) { _, i -> switchTo(i) }
-                      .setPositiveButton("Yeni sekme") { _, _ -> newTab(false) }
-                      .setNegativeButton("Bu sekmeyi kapat") { _, _ -> closeTab(current) }
-                      .show()
-              }
-
-              private fun showMenu(anchor: View) {
-                  val pm = PopupMenu(this, anchor)
-                  val m = pm.menu
-                  m.add("Yeni sekme").setOnMenuItemClickListener { newTab(false); true }
-                  m.add("Yeni gizli sekme").setOnMenuItemClickListener { newTab(true); true }
-                  m.add("Bu sekmeyi kapat").setOnMenuItemClickListener { closeTab(current); true }
-                  m.add(if (adBlock) "Reklam engelleyici: AÇIK" else "Reklam engelleyici: KAPALI")
-                      .setOnMenuItemClickListener {
-                          adBlock = !adBlock
-                          prefs.edit().putBoolean("adblock", adBlock).apply()
-                          if (!currentTab().home) currentTab().webView.reload()
-                          true
-                      }
-                  m.add(if (darkWeb) "Gece modu: AÇIK" else "Gece modu: KAPALI")
-                      .setOnMenuItemClickListener {
-                          darkWeb = !darkWeb
-                          prefs.edit().putBoolean("dark", darkWeb).apply()
-                          for (t in tabs) {
-                              t.webView.evaluateJavascript(if (darkWeb) DARK_ON else DARK_OFF, null)
-                          }
-                          true
-                      }
-                  m.add("İndirilenler").setOnMenuItemClickListener {
-                      startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
-                      true
-                  }
-                  pm.show()
-              }
-
-              private fun toUrl(input: String): String {
-                  val text = input.trim()
-                  if (text.isEmpty()) return ""
-                  if (text.startsWith("http://") || text.startsWith("https://")) return text
-                  val looksLikeAddress = !text.contains(" ") && text.contains(".")
-                  return if (looksLikeAddress) {
-                      "https://" + text
-                  } else {
-                      "https://www.google.com/search?q=" + Uri.encode(text)
-                  }
-              }
-
-              companion object {
-                  private const val DARK_ON =
-                      "(function(){var s=document.getElementById('__dk');if(!s){s=document.createElement('style');" +
-                          "s.id='__dk';(document.head||document.documentElement).appendChild(s);}" +
-                          "s.textContent='html{filter:invert(1) hue-rotate(180deg)!important;background:#fff!important}" +
-                          "img,video,picture,canvas{filter:invert(1) hue-rotate(180deg)!important}';})();"
-                  private const val DARK_OFF =
-                      "(function(){var s=document.getElementById('__dk');if(s){s.remove();}})();"
-              }
-          }
-          EOF
-          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:fitsSystemWindows="true"
-              android:orientation="vertical">
-
-              <LinearLayout
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:orientation="horizontal"
-                  android:padding="8dp">
-
-                  <EditText
-                      android:id="@+id/urlBar"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:hint="Ara veya adres yaz"
-                      android:imeOptions="actionGo"
-                      android:inputType="textUri"
-                      android:maxLines="1"
-                      android:selectAllOnFocus="true"
-                      android:singleLine="true" />
-
-                  <Button
-                      android:id="@+id/goBtn"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="Git" />
-              </LinearLayout>
-
-              <ProgressBar
-                  android:id="@+id/progress"
-                  style="?android:attr/progressBarStyleHorizontal"
-                  android:layout_width="match_parent"
-                  android:layout_height="3dp"
-                  android:max="100"
-                  android:visibility="gone" />
-
-              <FrameLayout
-                  android:layout_width="match_parent"
-                  android:layout_height="0dp"
-                  android:layout_weight="1">
-
-                  <ScrollView
-                      android:id="@+id/homeView"
-                      android:layout_width="match_parent"
-                      android:layout_height="match_parent">
-
-                      <GridLayout
-                          android:id="@+id/homeGrid"
-                          android:layout_width="match_parent"
-                          android:layout_height="wrap_content"
-                          android:columnCount="3"
-                          android:padding="12dp" />
-                  </ScrollView>
-
-                  <FrameLayout
-                      android:id="@+id/webContainer"
-                      android:layout_width="match_parent"
-                      android:layout_height="match_parent"
-                      android:visibility="gone" />
-              </FrameLayout>
-
-              <LinearLayout
-                  android:id="@+id/downloadBar"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:background="?attr/colorSurfaceVariant"
-                  android:gravity="center_vertical"
-                  android:orientation="horizontal"
-                  android:padding="8dp"
-                  android:visibility="gone">
-
-                  <TextView
-                      android:id="@+id/downloadText"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:ellipsize="end"
-                      android:maxLines="1" />
-
-                  <Button
-                      android:id="@+id/downloadBtn"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="İndir" />
-              </LinearLayout>
-
-              <LinearLayout
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:orientation="horizontal">
-
-                  <Button
-                      android:id="@+id/backBtn"
-                      style="?android:attr/buttonBarButtonStyle"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:minWidth="0dp"
-                      android:text="Geri"
-                      android:textSize="12sp" />
-
-                  <Button
-                      android:id="@+id/forwardBtn"
-                      style="?android:attr/buttonBarButtonStyle"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:minWidth="0dp"
-                      android:text="İleri"
-                      android:textSize="12sp" />
-
-                  <Button
-                      android:id="@+id/homeBtn"
-                      style="?android:attr/buttonBarButtonStyle"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:minWidth="0dp"
-                      android:text="Ana"
-                      android:textSize="12sp" />
-
-                <Button
-                      android:id="@+id/tabsBtn"
-                      style="?android:attr/buttonBarButtonStyle"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:minWidth="0dp"
-                      android:text="Sekme 1"
-                      android:textSize="12sp" />
-
-                  <Button
-                      android:id="@+id/menuBtn"
-                      style="?android:attr/buttonBarButtonStyle"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:minWidth="0dp"
-                      android:text="Menü"
-                      android:textSize="12sp" />
-              </LinearLayout>
-          </LinearLayout>
-          EOF
-          cat > app/src/main/res/values/strings.xml <<'EOF'
-          <resources>
-              <string name="app_name">Tarayıcı</string>
-          </resources>
-          EOF
-          cat > app/src/main/res/values/themes.xml <<'EOF'
-          <resources>
-              <style name="Theme.Tarayici" parent="Theme.Material3.DayNight.NoActionBar" />
-          </resources>
-          EOF
-          cat > build.gradle.kts <<'EOF'
-          plugins {
-              id("com.android.application") version "8.5.2" apply false
-              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
-          }
-          EOF
-          cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-          android.useAndroidX=true
-          kotlin.code.style=official
-          EOF
-          cat > settings.gradle.kts <<'EOF'
+          set -e
+          mkdir -p proje/app/src/main/java/com/tarayici/app
+          mkdir -p proje/app/src/main/res/values
+
+          cat > proje/settings.gradle <<'EOF'
           pluginManagement {
               repositories {
                   google()
@@ -706,125 +25,288 @@ jobs:
               }
           }
           dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
                   google()
                   mavenCentral()
               }
           }
-          rootProject.name = "Tarayici"
-          include(":app")
-          EOF     
-          - name: Ikon ve ad
-          run: |
-          cd proje/app/src/main
-          mkdir -p res/drawable res/mipmap-anydpi res/mipmap-anydpi-v26
-          cat > res/values/colors.xml <<'EOF'
-          <resources>
-              <color name="ic_bg">#12B5B0</color>
-          </resources>
+          rootProject.name = 'Tarayici'
+          include ':app'
           EOF
-          cat > res/drawable/ic_launcher_foreground.xml <<'EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp"
-              android:height="108dp"
-              android:viewportWidth="108"
-              android:viewportHeight="108">
-              <group
-                  android:scaleX="0.52"
-                  android:scaleY="0.52"
-                  android:translateX="19.2"
-                  android:translateY="12.4">
-                  <path
-                      android:fillColor="#FFFFFF"
-                      android:pathData="M6,74 L36,80 L6,86 Z" />
-                  <path
-                      android:fillColor="#E53935"
-                      android:pathData="M36,80 L128,30 L128,44.3 Z" />
-                  <path
-                      android:fillColor="#FB8C00"
-                      android:pathData="M36,80 L128,44.3 L128,58.6 Z" />
-                  <path
-                      android:fillColor="#FDD835"
-                      android:pathData="M36,80 L128,58.6 L128,72.9 Z" />
-                  <path
-                      android:fillColor="#43A047"
-                      android:pathData="M36,80 L128,72.9 L128,87.1 Z" />
-                  <path
-                      android:fillColor="#1E88E5"
-                      android:pathData="M36,80 L128,87.1 L128,101.4 Z" />
-                  <path
-                      android:fillColor="#3949AB"
-                      android:pathData="M36,80 L128,101.4 L128,115.7 Z" />
-                  <path
-                      android:fillColor="#8E24AA"
-                      android:pathData="M36,80 L128,115.7 L128,130 Z" />
-                  <path
-                      android:fillColor="#FFFFFF"
-                      android:pathData="M27,80 A9,9 0 1,0 45,80 A9,9 0 1,0 27,80 Z" />
-              </group>
-          </vector>
+
+          cat > proje/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.5.0' apply false
+          }
           EOF
-          cat > res/drawable/ic_launcher_full.xml <<'EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp"
-              android:height="108dp"
-              android:viewportWidth="160"
-              android:viewportHeight="160">
-              <path
-                  android:fillColor="#12B5B0"
-                  android:pathData="M36,0 H124 A36,36 0 0 1 160,36 V124 A36,36 0 0 1 124,160 H36 A36,36 0 0 1 0,124 V36 A36,36 0 0 1 36,0 Z" />
-              <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M6,74 L36,80 L6,86 Z" />
-              <path
-                  android:fillColor="#E53935"
-                  android:pathData="M36,80 L128,30 L128,44.3 Z" />
-              <path
-                  android:fillColor="#FB8C00"
-                  android:pathData="M36,80 L128,44.3 L128,58.6 Z" />
-              <path
-                  android:fillColor="#FDD835"
-                  android:pathData="M36,80 L128,58.6 L128,72.9 Z" />
-              <path
-                  android:fillColor="#43A047"
-                  android:pathData="M36,80 L128,72.9 L128,87.1 Z" />
-              <path
-                  android:fillColor="#1E88E5"
-                  android:pathData="M36,80 L128,87.1 L128,101.4 Z" />
-              <path
-                  android:fillColor="#3949AB"
-                  android:pathData="M36,80 L128,101.4 L128,115.7 Z" />
-              <path
-                  android:fillColor="#8E24AA"
-                  android:pathData="M36,80 L128,115.7 L128,130 Z" />
-              <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M27,80 A9,9 0 1,0 45,80 A9,9 0 1,0 27,80 Z" />
-          </vector>
+
+          cat > proje/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2g
+          android.useAndroidX=false
           EOF
-          cat > res/mipmap-anydpi/ic_launcher.xml <<'EOF'
-          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-              <item android:drawable="@drawable/ic_launcher_full" />
-          </layer-list>
+
+          cat > proje/app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.tarayici.app'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.tarayici.app'
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
           EOF
-          cat > res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_bg" />
-              <foreground android:drawable="@drawable/ic_launcher_foreground" />
-          </adaptive-icon>
+
+          cat > proje/app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+              <application
+                  android:label="Tarayici"
+                  android:icon="@android:drawable/sym_def_app_icon"
+                  android:usesCleartextTraffic="true"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
           EOF
-          sed -i 's/Tarayıcı/Sonsuz/' res/values/strings.xml
-          sed -i 's|android:allowBackup="true"|android:allowBackup="true" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"|' AndroidManifest.xml
+
+          cat > proje/app/src/main/java/com/tarayici/app/MainActivity.java <<'EOF'
+          package com.tarayici.app;
+
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.app.DownloadManager;
+          import android.graphics.Bitmap;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.Environment;
+          import android.view.KeyEvent;
+          import android.view.View;
+          import android.view.inputmethod.EditorInfo;
+          import android.webkit.CookieManager;
+          import android.webkit.URLUtil;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebResourceResponse;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.ProgressBar;
+          import android.widget.Toast;
+
+          import java.util.ArrayList;
+          import java.util.LinkedHashSet;
+
+          public class MainActivity extends Activity {
+              WebView web;
+              EditText urlBar;
+              Button dlBtn;
+              ProgressBar bar;
+              final LinkedHashSet<String> found = new LinkedHashSet<>();
+
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  if (Build.VERSION.SDK_INT >= 23 && Build.VERSION.SDK_INT <= 28) {
+                      requestPermissions(new String[]{"android.permission.WRITE_EXTERNAL_STORAGE"}, 1);
+                  }
+
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+
+                  LinearLayout top = new LinearLayout(this);
+                  top.setOrientation(LinearLayout.HORIZONTAL);
+
+                  urlBar = new EditText(this);
+                  urlBar.setSingleLine(true);
+                  urlBar.setHint("Adres veya arama");
+                  urlBar.setImeOptions(EditorInfo.IME_ACTION_GO);
+                  top.addView(urlBar, new LinearLayout.LayoutParams(0, -2, 1f));
+
+                  Button go = new Button(this);
+                  go.setText("Git");
+                  top.addView(go, new LinearLayout.LayoutParams(-2, -2));
+
+                  dlBtn = new Button(this);
+                  dlBtn.setText("\u2B07");
+                  dlBtn.setVisibility(View.GONE);
+                  top.addView(dlBtn, new LinearLayout.LayoutParams(-2, -2));
+
+                  root.addView(top, new LinearLayout.LayoutParams(-1, -2));
+
+                  bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+                  bar.setMax(100);
+                  root.addView(bar, new LinearLayout.LayoutParams(-1, 8));
+
+                  web = new WebView(this);
+                  root.addView(web, new LinearLayout.LayoutParams(-1, 0, 1f));
+                  setContentView(root);
+
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setBuiltInZoomControls(true);
+                  s.setDisplayZoomControls(false);
+                  s.setLoadWithOverviewMode(true);
+                  s.setUseWideViewPort(true);
+                  CookieManager.getInstance().setAcceptCookie(true);
+                  CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
+
+                  web.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public void onProgressChanged(WebView v, int p) {
+                          bar.setProgress(p);
+                          bar.setVisibility(p >= 100 ? View.GONE : View.VISIBLE);
+                      }
+                  });
+
+                  web.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public void onPageStarted(WebView v, String u, Bitmap f) {
+                          urlBar.setText(u);
+                          found.clear();
+                          dlBtn.setVisibility(View.GONE);
+                      }
+
+                      @Override
+                      public void onPageFinished(WebView v, String u) {
+                          String js = "(function(){var r=[];document.querySelectorAll('video,audio,source').forEach(function(e){var s=e.currentSrc||e.src;if(s&&s.indexOf('http')==0)r.push(s)});return r.join(' ');})()";
+                          v.evaluateJavascript(js, new android.webkit.ValueCallback<String>() {
+                              @Override
+                              public void onReceiveValue(String val) {
+                                  if (val == null) return;
+                                  val = val.replace("\"", "").trim();
+                                  if (val.isEmpty() || val.equals("null")) return;
+                                  for (String x : val.split(" ")) addFound(x);
+                              }
+                          });
+                      }
+
+                      @Override
+                      public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) {
+                          String u = r.getUrl().toString();
+                          String l = u.toLowerCase();
+                          if (l.contains(".mp4") || l.contains(".mp3") || l.contains(".m4a")
+                                  || l.contains(".webm") || l.contains(".ogg") || l.contains(".wav")
+                                  || l.contains(".mkv") || l.contains(".aac")) {
+                              addFound(u);
+                          }
+                          return null;
+                      }
+                  });
+
+                  web.setDownloadListener((u, ua, cd, mime, len) -> startDownload(u, ua, cd, mime));
+
+                  go.setOnClickListener(v -> load());
+                  urlBar.setOnEditorActionListener((tv, id, ev) -> {
+                      load();
+                      return true;
+                  });
+                  dlBtn.setOnClickListener(v -> showList());
+
+                  web.loadUrl("https://www.google.com");
+              }
+
+              void addFound(final String u) {
+                  runOnUiThread(() -> {
+                      if (found.add(u)) {
+                          dlBtn.setText("\u2B07 " + found.size());
+                          dlBtn.setVisibility(View.VISIBLE);
+                      }
+                  });
+              }
+
+              void load() {
+                  String t = urlBar.getText().toString().trim();
+                  if (t.isEmpty()) return;
+                  if (t.startsWith("http://") || t.startsWith("https://")) {
+                      web.loadUrl(t);
+                  } else if (t.contains(".") && !t.contains(" ")) {
+                      web.loadUrl("https://" + t);
+                  } else {
+                      web.loadUrl("https://www.google.com/search?q=" + Uri.encode(t));
+                  }
+              }
+
+              void showList() {
+                  final ArrayList<String> list = new ArrayList<>(found);
+                  String[] names = new String[list.size()];
+                  for (int i = 0; i < names.length; i++) {
+                      String n = URLUtil.guessFileName(list.get(i), null, null);
+                      names[i] = n;
+                  }
+                  new AlertDialog.Builder(this)
+                          .setTitle("Indir")
+                          .setItems(names, (d, i) ->
+                                  startDownload(list.get(i), web.getSettings().getUserAgentString(), null, null))
+                          .show();
+              }
+
+              void startDownload(String u, String ua, String cd, String mime) {
+                  try {
+                      DownloadManager.Request r = new DownloadManager.Request(Uri.parse(u));
+                      String name = URLUtil.guessFileName(u, cd, mime);
+                      if (mime != null && !mime.isEmpty()) r.setMimeType(mime);
+                      String ck = CookieManager.getInstance().getCookie(u);
+                      if (ck != null) r.addRequestHeader("Cookie", ck);
+                      if (ua != null) r.addRequestHeader("User-Agent", ua);
+                      r.addRequestHeader("Referer", web.getUrl() == null ? u : web.getUrl());
+                      r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                      r.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
+                      ((DownloadManager) getSystemService(DOWNLOAD_SERVICE)).enqueue(r);
+                      Toast.makeText(this, "Indiriliyor: " + name, Toast.LENGTH_SHORT).show();
+                  } catch (Exception e) {
+                      Toast.makeText(this, "Hata: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              @Override
+              public boolean onKeyDown(int k, KeyEvent e) {
+                  if (k == KeyEvent.KEYCODE_BACK && web.canGoBack()) {
+                      web.goBack();
+                      return true;
+                  }
+                  return super.onKeyDown(k, e);
+              }
+          }
+          EOF
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
+
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.9"
-      - run: gradle -p proje assembleDebug --stacktrace
+          gradle-version: '8.7'
+
+      - name: APK derle
+        run: gradle -p proje assembleDebug --stacktrace
+
       - uses: actions/upload-artifact@v4
         with:
-          name: tarayici-apk
-          path: proje/app/build/outputs/apk/debug/app-debug.apk
+          name: Tarayici-APK
+          path: proje/app/build/outputs/apk/debug/*.apk
